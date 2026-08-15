@@ -52,10 +52,12 @@ func NewControllers(
 	pricingProvider *pricing.DefaultProvider,
 ) []controller.Controller {
 	opts := options.FromContext(ctx)
-	// operatorpkg's status controller takes the client-go record.EventRecorder, which is also what
-	// the nodeclass termination controller uses. Both take the same recorder rather than mixing
-	// event APIs across controllers.
-	recorder := mgr.GetEventRecorderFor("karpenter")
+	// operatorpkg's status.NewController and the nodeclass termination controller both take the
+	// legacy client-go record.EventRecorder. controller-runtime's newer GetEventRecorder returns
+	// events.EventRecorder instead, which does not satisfy either signature, so the deprecated
+	// accessor is the only one whose type fits. Both controllers take the same recorder rather than
+	// mixing event APIs.
+	recorder := mgr.GetEventRecorderFor("karpenter") //nolint:staticcheck // SA1019: operatorpkg requires the legacy record.EventRecorder.
 	return []controller.Controller{
 		nodeclass.NewController(kubeClient, stackitClient, opts.Region, validationCache, opts.DisableDryRun),
 		nodeclasshash.NewController(kubeClient),
