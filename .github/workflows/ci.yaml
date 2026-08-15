@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Run the same pinned golangci-lint the Makefile uses, rather than the action's own version,
+      # so a lint failure here is reproducible with `make lint` locally.
+      - name: golangci-lint
+        run: go tool -modfile=go.tools.mod golangci-lint run --timeout=10m
+
+  generated:
+    name: Generated code is current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The CRDs are embedded in the controller binary AND shipped in the karpenter-crd chart. If a
+      # change to the API types lands without regenerating them, the controller reconciles against a
+      # schema the cluster does not have. This is the check that catches it.
+      - name: Regenerate and diff
+        run: make verify
+
+  helm:
+    name: Helm charts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+
+      - name: Lint charts
+        run: |
+          helm lint charts/karpenter-crd
+          helm lint charts/karpenter \
+            --set settings.clusterName=ci \
+            --set settings.projectID=00000000-0000-0000-0000-000000000000 \
+            --set settings.region=eu01 \
+            --set credentials.serviceAccountToken=dummy
+
+      - name: Render charts
+        run: |
+          helm template karpenter charts/karpenter \
+            --set settings.clusterName=ci \
+            --set settings.projectID=00000000-0000-0000-0000-000000000000 \
+            --set settings.region=eu01 \
+            --set credentials.serviceAccountToken=dummy > /dev/null
+          helm template karpenter-crd charts/karpenter-crd > /dev/null
+
+      # The chart must refuse to install without credentials rather than deploying a controller that
+      # crash-loops on startup with an unhelpful error.
+      - name: Reject missing credentials
+        run: |
+          if helm template karpenter charts/karpenter \
+              --set settings.clusterName=ci \
+              --set settings.projectID=00000000-0000-0000-0000-000000000000 \
+              --set settings.region=eu01 >/dev/null 2>&1; then
+            echo "chart rendered without credentials; it should have failed"
+            exit 1
+          fi
+
+      # --region must match the cloud-controller-manager's region or NodeClaims never register, so
+      # the chart must not quietly default it.
+      - name: Reject missing region
+        run: |
+          if helm template karpenter charts/karpenter \
+              --set settings.clusterName=ci \
+              --set settings.projectID=00000000-0000-0000-0000-000000000000 \
+              --set credentials.serviceAccountToken=dummy >/dev/null 2>&1; then
+            echo "chart rendered without a region; it should have failed"
+            exit 1
+          fi

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "karpenter.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "karpenter.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "karpenter.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http-metrics
+      port: {{ .Values.controller.metrics.port }}
+      targetPort: http-metrics
+      protocol: TCP

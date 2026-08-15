@@ -1,0 +1,9 @@
+apiVersion: v2
+name: karpenter-crd
+description: Custom Resource Definitions for Karpenter on STACKIT.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/kubekanvas/karpenter-provider-stackit
+sources:
+  - https://github.com/kubekanvas/karpenter-provider-stackit

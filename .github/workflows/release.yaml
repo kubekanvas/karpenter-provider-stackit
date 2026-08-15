@@ -1,0 +1,140 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Publish image, charts and release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub Release
+      packages: write # push the image and charts to ghcr.io
+      id-token: write # keyless signing, should it be added later
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: azure/setup-helm@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          REF="${{ github.event.inputs.version || github.ref_name }}"
+          echo "tag=${REF}" >> "$GITHUB_OUTPUT"
+          # Helm chart versions are semver without the leading v.
+          echo "version=${REF#v}" >> "$GITHUB_OUTPUT"
+
+      # Re-run the gates here rather than trusting that CI passed on the commit: a tag can be
+      # pushed to any commit, including one that never went through a pull request.
+      - name: Verify
+        run: |
+          go build ./...
+          go test ./...
+          make verify
+
+      # Two logins are required, and they are not interchangeable. Helm keeps its own registry
+      # credential store, while ko resolves credentials through go-containerregistry's keychain,
+      # which reads ~/.docker/config.json — the file docker/login-action writes. Authenticating only
+      # one of them leaves the other pushing anonymously, which ghcr.io rejects with a bare DENIED.
+      - name: Log in to ghcr.io for ko
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to ghcr.io for helm
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push controller image
+        id: image
+        env:
+          # --bare uses this verbatim as the image name instead of appending the Go import path,
+          # which keeps it aligned with image.repository in the chart's values.yaml.
+          KO_DOCKER_REPO: ghcr.io/${{ github.repository }}/controller
+          KO_CONFIG_PATH: .ko.yaml
+        run: |
+          set -euo pipefail
+          # A multi-arch build emits one ref per platform plus the index, so the refs go to a file
+          # rather than being captured from stdout: GITHUB_OUTPUT rejects a multi-line value written
+          # as a plain key=value, and the step fails *after* the image has already been pushed.
+          go tool -modfile=go.tools.mod ko build ./cmd/controller \
+            --bare \
+            --platform=linux/amd64,linux/arm64 \
+            --tags="${{ steps.version.outputs.version }},latest" \
+            --image-refs=image-refs.txt
+          echo "published refs:"
+          cat image-refs.txt
+          # The tag is what the chart references and is guaranteed to be a single line.
+          echo "ref=ghcr.io/${{ github.repository }}/controller:${{ steps.version.outputs.version }}" >> "$GITHUB_OUTPUT"
+
+      # The controller image and the CRD chart are cut from one commit on purpose: the CRDs are
+      # compiled into the binary, so a chart that ships a different schema than the binary expects
+      # is a broken install. Stamping both from the same tag is what keeps them in lockstep.
+      - name: Stamp chart versions
+        run: |
+          set -euo pipefail
+          V="${{ steps.version.outputs.version }}"
+          for chart in charts/karpenter charts/karpenter-crd; do
+            sed -i "s/^version: .*/version: ${V}/" "$chart/Chart.yaml"
+            sed -i "s/^appVersion: .*/appVersion: \"${V}\"/" "$chart/Chart.yaml"
+          done
+          grep -H '^\(version\|appVersion\):' charts/*/Chart.yaml
+
+      - name: Package and push charts
+        run: |
+          set -euo pipefail
+          V="${{ steps.version.outputs.version }}"
+          mkdir -p dist
+          helm package charts/karpenter-crd --destination dist
+          helm package charts/karpenter --destination dist
+          helm push "dist/karpenter-crd-${V}.tgz" oci://ghcr.io/${{ github.repository_owner }}/charts
+          helm push "dist/karpenter-${V}.tgz" oci://ghcr.io/${{ github.repository_owner }}/charts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            dist/karpenter-${{ steps.version.outputs.version }}.tgz
+            dist/karpenter-crd-${{ steps.version.outputs.version }}.tgz
+          body: |
+            ## Install
+
+            ```bash
+            helm upgrade --install karpenter-crd \
+              oci://ghcr.io/${{ github.repository_owner }}/charts/karpenter-crd \
+              --version ${{ steps.version.outputs.version }} \
+              --namespace karpenter --create-namespace
+            ```
+
+            ```bash
+            helm upgrade --install karpenter \
+              oci://ghcr.io/${{ github.repository_owner }}/charts/karpenter \
+              --version ${{ steps.version.outputs.version }} \
+              --namespace karpenter \
+              --set settings.clusterName=my-cluster \
+              --set settings.projectID=<stackit-project-id> \
+              --set settings.region=eu01 \
+              --set credentials.existingSecret=stackit-credentials
+            ```
+
+            Controller image: `${{ steps.image.outputs.ref }}`

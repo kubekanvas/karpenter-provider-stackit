@@ -1,0 +1,72 @@
+apiVersion: karpenter.k8s.stackit/v1alpha1
+kind: StackitNodeClass
+metadata:
+  name: default
+spec:
+  # Availability zones to launch into. All must belong to the region the controller was started
+  # with (--region / settings.region). Omit the field entirely to use every zone in that region.
+  availabilityZones:
+    - eu01-1
+    - eu01-2
+
+  bootVolume:
+    # The image to boot from. List images with:
+    #   stackit beta image list --project-id <project-id>
+    source:
+      id: 00000000-0000-0000-0000-000000000000
+      type: image
+    size: 50
+    # Optional. List classes with the IaaS API's volume-performance-classes endpoint.
+    # performanceClass: storage_premium_perf1
+    #
+    # deleteOnTermination defaults to true and should stay that way. STACKIT's DeleteServer does
+    # not delete volumes, and the API's own default for this flag is false, so setting it to false
+    # leaks a billable root disk for every node Karpenter terminates. This provider does not track
+    # or clean up those volumes.
+    deleteOnTermination: true
+
+  # Exactly one of networkID or nicIDs is required.
+  networking:
+    networkID: 00000000-0000-0000-0000-000000000000
+
+  # Optional: security groups attached to every node.
+  # securityGroups:
+  #   - 00000000-0000-0000-0000-000000000000
+
+  # Optional: a STACKIT SSH keypair authorized on the node.
+  # keypairName: my-keypair
+
+  # Optional: an anti-affinity group, to spread nodes across STACKIT hosts.
+  # affinityGroup: 00000000-0000-0000-0000-000000000000
+
+  # Extra STACKIT server labels. The keys karpenter.sh/managed-by, karpenter.sh/nodepool,
+  # karpenter.sh/nodeclaim and karpenter.k8s.stackit/nodeclass are reserved by the controller.
+  labels:
+    environment: production
+
+  # cloud-init user data. WITHOUT THIS THE NODE BOOTS BUT NEVER JOINS THE CLUSTER, and Karpenter
+  # will garbage collect it once the registration TTL expires. Substitute your own bootstrap:
+  # the API server endpoint, the join token or certificate, and the CCM/CSI prerequisites.
+  userData: |
+    #cloud-config
+    write_files:
+      - path: /etc/kubernetes/bootstrap.sh
+        permissions: "0755"
+        content: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          # Replace with your distribution's node bootstrap, e.g. kubeadm join or a k3s agent
+          # install. The node must come up with --cloud-provider=external so that
+          # cloud-provider-stackit is the component that sets spec.providerID; this controller
+          # matches NodeClaims on the exact string the CCM writes (stackit://<server-id>).
+          echo "replace me with a real bootstrap"
+    runcmd:
+      - /etc/kubernetes/bootstrap.sh
+
+  # Optional kubelet settings. Karpenter uses these to compute allocatable capacity; applying them
+  # to the kubelet itself is the job of the bootstrap script above.
+  kubelet:
+    maxPods: 110
+    systemReserved:
+      cpu: 100m
+      memory: 100Mi

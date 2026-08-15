@@ -1,0 +1,131 @@
+replicas: 1
+
+image:
+  repository: ghcr.io/kubekanvas/karpenter-provider-stackit/controller
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+settings:
+  # clusterName labels every server this controller launches and is the filter used to find them
+  # again. Two clusters sharing a STACKIT project must not share a name.
+  clusterName: ""
+  # projectID is the STACKIT project servers are created in.
+  projectID: ""
+  # region is the STACKIT region servers are created in, e.g. eu01.
+  #
+  # This MUST match the region the STACKIT cloud-controller-manager is configured with. The CCM
+  # writes its own configured region to every node as topology.kubernetes.io/region, so a mismatch
+  # produces NodeClaims whose region requirement no node can ever satisfy and nothing registers.
+  region: ""
+  # Fraction of a machine type's advertised memory assumed lost to virtualization, used until a real
+  # node of that type reports its capacity.
+  vmMemoryOverheadPercent: 0.075
+  # STACKIT publishes no price list API, so prices are modeled from each machine type's vCPU, RAM
+  # and disk. Karpenter only compares prices to each other, so the ratios are what matter. Override
+  # individual machine types here if you have contract pricing and want the cost metrics to be
+  # absolute, e.g. "g1.2=0.0716,g1.4=0.1432".
+  pricingOverrides: ""
+  # Skip validating NodeClass references against the STACKIT API.
+  disableDryRun: false
+  logLevel: info
+  # Karpenter core settings.
+  batchMaxDuration: 10s
+  batchIdleDuration: 1s
+  featureGates:
+    nodeRepair: false
+    reservedCapacity: true
+    spotToSpotConsolidation: false
+
+# STACKIT credentials. Prefer an existing Secret so the key never lands in values.yaml or in the
+# Helm release history.
+#
+# The Secret must contain one of STACKIT_SERVICE_ACCOUNT_KEY, STACKIT_SERVICE_ACCOUNT_KEY_PATH or
+# STACKIT_SERVICE_ACCOUNT_TOKEN; the STACKIT SDK discovers whichever is present.
+credentials:
+  existingSecret: ""
+  # Only used when existingSecret is empty. A service account key is preferred over a token because
+  # the SDK refreshes it automatically, whereas a token expires.
+  serviceAccountKey: ""
+  serviceAccountToken: ""
+
+# Karpenter must not schedule onto nodes it manages, or it can evict itself and lose the ability to
+# bring the cluster back. Keep it pinned to the control plane or to a static node pool.
+nodeSelector:
+  kubernetes.io/os: linux
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: karpenter.sh/nodepool
+              operator: DoesNotExist
+tolerations:
+  - key: CriticalAddonsOnly
+    operator: Exists
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: karpenter
+
+priorityClassName: system-cluster-critical
+
+podAnnotations: {}
+podLabels: {}
+
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+podSecurityContext:
+  fsGroup: 65534
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+  seccompProfile:
+    type: RuntimeDefault
+
+controller:
+  env: []
+  healthProbe:
+    port: 8081
+  metrics:
+    port: 8080
+
+serviceMonitor:
+  enabled: false
+  additionalLabels: {}
+  endpointConfig: {}
+
+logConfig:
+  enabled: false
+
+# Extra objects rendered as-is, e.g. a default StackitNodeClass and NodePool.
+extraObjects: []

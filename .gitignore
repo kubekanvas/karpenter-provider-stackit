@@ -1,0 +1,5 @@
+*.test
+/bin/
+/dist/
+coverage.out
+image-refs.txt
