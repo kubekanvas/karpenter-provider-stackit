@@ -169,12 +169,12 @@ Requires a cluster already running
 `--cloud-provider=external` on the kubelets.
 
 ```bash
-helm install karpenter-crd oci://ghcr.io/kubekanvas/charts/karpenter-crd \
+helm install karpenter-crd oci://ghcr.io/kubekanvas/karpenter-provider-stackit/charts/karpenter-crd \
   --namespace karpenter --create-namespace
 ```
 
 ```bash
-helm install karpenter oci://ghcr.io/kubekanvas/charts/karpenter \
+helm install karpenter oci://ghcr.io/kubekanvas/karpenter-provider-stackit/charts/karpenter \
   --namespace karpenter \
   --set settings.clusterName=my-cluster \
   --set settings.projectID=<stackit-project-id> \

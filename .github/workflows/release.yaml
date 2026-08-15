@@ -105,8 +105,8 @@ jobs:
           mkdir -p dist
           helm package charts/karpenter-crd --destination dist
           helm package charts/karpenter --destination dist
-          helm push "dist/karpenter-crd-${V}.tgz" oci://ghcr.io/${{ github.repository_owner }}/charts
-          helm push "dist/karpenter-${V}.tgz" oci://ghcr.io/${{ github.repository_owner }}/charts
+          helm push "dist/karpenter-crd-${V}.tgz" oci://ghcr.io/${{ github.repository }}/charts
+          helm push "dist/karpenter-${V}.tgz" oci://ghcr.io/${{ github.repository }}/charts
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -121,14 +121,14 @@ jobs:
 
             ```bash
             helm upgrade --install karpenter-crd \
-              oci://ghcr.io/${{ github.repository_owner }}/charts/karpenter-crd \
+              oci://ghcr.io/${{ github.repository }}/charts/karpenter-crd \
               --version ${{ steps.version.outputs.version }} \
               --namespace karpenter --create-namespace
             ```
 
             ```bash
             helm upgrade --install karpenter \
-              oci://ghcr.io/${{ github.repository_owner }}/charts/karpenter \
+              oci://ghcr.io/${{ github.repository }}/charts/karpenter \
               --version ${{ steps.version.outputs.version }} \
               --namespace karpenter \
               --set settings.clusterName=my-cluster \
