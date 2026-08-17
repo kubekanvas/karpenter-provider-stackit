@@ -6,10 +6,6 @@ against `sigs.k8s.io/karpenter` v1.14.0 and the STACKIT IaaS v2 API.
 It provisions STACKIT IaaS servers for pending pods, consolidates underutilized nodes, and cleans up
 servers whose NodeClaim has gone away.
 
-> **Status: v0.1.x, not yet exercised against a production STACKIT account.** The mappings below
-> were derived by reading `cloud-provider-stackit` and `stackit-sdk-go` at the versions cited, and
-> the invariants that depend on them are covered by unit tests. They have not yet been confirmed
-> against live STACKIT infrastructure.
 
 ## Why the details below matter
 
